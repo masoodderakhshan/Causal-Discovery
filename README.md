@@ -2,7 +2,7 @@
 
 ### 📝 Status
 
-**Journal:** Catena (Submitted)
+**Journal:** ISPRS Journal of Photogrammetry and Remote Sensing (Submitted)
 **License:** [![Status](https://img.shields.io/badge/Status-Submitted-blue)](https://www.Elsevier.com/journal/11069)
 [![Journal](https://img.shields.io/badge/Journal-ISPRSJournalofPhotogrammetryandRemoteSensing-orange)](https://www.Elsevier.com/journal/11069)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
