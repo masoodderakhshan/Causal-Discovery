@@ -1,0 +1,142 @@
+import matplotlib.pyplot as plt
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+import numpy as np
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+import cartopy.io.shapereader as shpreader
+import requests
+import zipfile
+import os
+import matplotlib.font_manager
+import matplotlib.patches as mpatches
+matplotlib.font_manager._get_fontconfig_fonts.cache_clear()
+# --- Download and extract shapefile ---
+url = "https://geodata.ucdavis.edu/gadm/gadm4.1/shp/gadm41_IRN_shp.zip"
+zip_filename = "gadm41_IRN_shp.zip"
+shp_filename = "gadm41_IRN_1.shp"
+
+if not os.path.exists(shp_filename):
+    print("Downloading shapefile...")
+    with requests.get(url, stream=True) as r:
+        r.raise_for_status()
+        with open(zip_filename, 'wb') as f:
+            for chunk in r.iter_content(chunk_size=8192):
+                f.write(chunk)
+    print("Unzipping shapefile...")
+    with zipfile.ZipFile(zip_filename, 'r') as zip_ref:
+        zip_ref.extractall(".")
+    print("Download and extraction complete.")
+
+# --- Study Areas ---
+study_areas = [
+    {"name": "Urmia", "lat": [37.0002, 38.5002], "lon": [44.5002, 46.5002], "color": "blue"},
+    {"name": "Tehran", "lat": [35.0002, 36.0002], "lon": [50.5002, 51.7502], "color": "blue"},
+    {"name": "Neyshabur", "lat": [35.7502, 36.5002], "lon": [58.0003, 59.5003], "color": "blue"},
+    {"name": "Marvdasht", "lat": [29.5001, 30.5001], "lon": [52.0002, 53.5002], "color": "blue"},
+    {"name": "Lenjanat", "lat": [32.0, 32.5], "lon": [51.5, 52.0], "color": "blue"},
+    {"name": "Dolat Abad", "lat": [28.0001, 28.7501], "lon": [56.0003, 57.0003], "color": "blue"},
+    {"name": "Bardsir", "lat": [30.0001, 31.0001], "lon": [56.0003, 57.5003], "color": "blue"},
+    {"name": "Semnan", "lat": [35.2502, 35.7502], "lon": [53.0002, 53.7502], "color": "blue"},
+]
+
+# --- 1. CHANGE FONT TO TIMES NEW ROMAN ---
+plt.rcParams['font.family'] = 'DejaVu serif'
+
+# --- Setup Map ---
+fig = plt.figure(figsize=(10, 10), dpi=600)
+ax = fig.add_subplot(1, 1, 1, projection=ccrs.PlateCarree())
+main_map_extent = [43, 64, 25, 41]
+ax.set_extent(main_map_extent, crs=ccrs.PlateCarree())
+
+
+# --- Custom Coloring and Features ---
+ax.add_feature(cfeature.LAND, facecolor='white', zorder=0)
+ax.add_feature(cfeature.OCEAN, facecolor='#d6e6f0', zorder=0)
+ax.add_feature(cfeature.BORDERS, linewidth=1.0, edgecolor='black', zorder=5)
+ax.add_feature(cfeature.COASTLINE, linewidth=0.8, edgecolor='black', zorder=5)
+ax.add_feature(cfeature.LAKES, facecolor='#d6e6f0', edgecolor='k', linewidth=0.3, zorder=3)
+ax.add_feature(cfeature.RIVERS, edgecolor='#99c2ff', linewidth=0.4, zorder=3)
+
+# --- Add province boundaries and names ---
+provinces_shp = shpreader.Reader(shp_filename)
+provinces = list(provinces_shp.records())
+for province in provinces:
+    ax.add_geometries(province.geometry, ccrs.PlateCarree(),
+                      edgecolor='gray', facecolor='none', linewidth=0.5, zorder=4)
+    centroid = province.geometry.centroid
+    # ax.text(centroid.x, centroid.y, province.attributes['NAME_1'], # Optional: commented out to reduce clutter
+    #         ha='center', va='center', fontsize=6, color='black',
+    #         transform=ccrs.PlateCarree(), zorder=10)
+
+# --- Gridlines (Enhanced for clarity) ---
+gl = ax.gridlines(draw_labels=True, linewidth=0.5, color='gray', alpha=0.7, linestyle='--')
+gl.top_labels = False
+gl.right_labels = False
+gl.xlabel_style = {'size': 12, 'color': 'Black'}
+gl.ylabel_style = {'size': 12, 'color': 'Black'}
+
+# --- 2. ADD GULF AND SEA NAMES ---
+sea_font_style = {'fontsize': 10, 'color': 'navy', 'style': 'italic', 'zorder': 11, 'ha': 'center', 'va': 'center'}
+ax.text(51.5, 39, 'Caspian Sea', transform=ccrs.PlateCarree(), rotation=-30, **sea_font_style)
+ax.text(52, 26.5, 'Persian Gulf', transform=ccrs.PlateCarree(), rotation=-30,**sea_font_style)
+ax.text(57.8, 25.4, 'Gulf of Oman', transform=ccrs.PlateCarree(), rotation=-10,**sea_font_style)
+
+
+# --- Plot Study Areas ---
+for area in study_areas:
+    lat, lon, name = area["lat"], area["lon"], area["name"]
+
+    lons_poly = [lon[0], lon[1], lon[1], lon[0], lon[0]]
+    lats_poly = [lat[0], lat[0], lat[1], lat[1], lat[0]]
+
+    # Draw shaded rectangle for the study area
+    ax.fill(lons_poly, lats_poly, facecolor=area["color"], edgecolor=area["color"],
+            alpha=0.3, transform=ccrs.PlateCarree(), zorder=8)
+
+    center_lon = (lon[0] + lon[1]) / 2
+    center_lat = (lat[0] + lat[1]) / 2
+
+
+    # --- 3. WRITE STUDY AREA NAMES ABOVE ---
+    # Place text above the top edge of the box
+    ax.text(center_lon, lat[1] + 0.1, name,
+            ha='center', va='bottom', # Align bottom of text to the specified point
+            fontsize=12,
+            transform=ccrs.PlateCarree(), zorder=12)
+
+
+# --- Inset Regional Map ---
+ax_inset = fig.add_axes(
+    [0.74, 0.62, 0.25, 0.25],
+    projection=ccrs.PlateCarree()
+)
+inset_extent = [24, 83, 11, 55]
+ax_inset.set_extent(inset_extent, crs=ccrs.PlateCarree())
+
+ax_inset.add_feature(cfeature.LAND, facecolor='white')
+ax_inset.add_feature(cfeature.OCEAN, facecolor='#d6e6f0')
+ax_inset.add_feature(cfeature.COASTLINE, linewidth=0.5, edgecolor='black')
+
+main_extent_box = [43, 64, 25, 41]
+lons = [main_extent_box[0], main_extent_box[1], main_extent_box[1], main_extent_box[0], main_extent_box[0]]
+lats = [main_extent_box[2], main_extent_box[2], main_extent_box[3], main_extent_box[3], main_extent_box[2]]
+ax_inset.plot(lons, lats, color='red', linewidth=2, transform=ccrs.PlateCarree(), zorder=10)
+
+
+# --- Add Scale Bar ---
+def add_scale_bar(ax, lon, lat, length_km, text_distance_km):
+    deg_per_km_lon = 1 / (111.32 * np.cos(np.radians(lat)))
+    deg_per_km_lat = 1 / 111.1
+    length_deg_lon = length_km * deg_per_km_lon
+
+    ax.plot([lon, lon + length_deg_lon], [lat, lat], color='black', linewidth=4, transform=ccrs.Geodetic())
+    ax.text(lon + length_deg_lon / 2, lat + text_distance_km * deg_per_km_lat, f"{length_km} km",
+            ha='center', va='bottom', fontsize=10, transform=ccrs.Geodetic())
+
+add_scale_bar(ax, 44, 26, 300, 20)
+
+
+# --- Final Touches ---
+plt.tight_layout(rect=[0, 0, 1, 0.95])
+plt.savefig('iran_study_areas_map_final.png', dpi=600, bbox_inches='tight')
+plt.show()

@@ -1,0 +1,195 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split, KFold, cross_val_score
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import ElasticNet
+from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
+from sklearn.feature_selection import mutual_info_regression
+
+# -------------------------
+# Load data
+# -------------------------
+npz = np.load("/content/URM_TEH_NEY_MARV_LENJ.npz", allow_pickle=True)
+data = npz["data"]
+coords = npz["coords"]
+
+# -------------------------
+# Select your features
+# -------------------------
+selected_indices = [
+    0, 1,5, 9, 10, 11, 12, 13,
+    14, 22
+]
+
+feature_names = [
+    "RootMoist_inst",
+    "SoilMoi0_10cm_inst", "SoilTMP0_10cm_inst",
+    "Evap_tavg",
+    "Rainf_tavg",
+    "Qsb_acc",
+    "Tair_f_inst",
+    "Wind_f_inst",
+    "avg_displacement_mm",
+    "soc_mean_05"
+]
+
+# -------------------------
+# Build dataset (X_t → y_{t+1})
+# -------------------------
+X_list = []
+y_list = []
+
+T, G, F = data.shape  
+
+for t in range(T - 1):  
+    X_t = data[t][:, selected_indices]  
+    y_next = data[t + 1][:, 14]  # next timestep displacement
+    X_list.append(X_t)
+    y_list.append(y_next)
+
+X_flat = np.vstack(X_list)
+y_flat = np.hstack(y_list)
+
+df = pd.DataFrame(X_flat, columns=feature_names)
+df["target_next_displacement"] = y_flat
+df = df.replace([np.inf, -np.inf], np.nan).dropna()
+
+# Define X, y
+X = df[feature_names].values
+y = df["target_next_displacement"].values
+
+# -------------------------
+# Train-Test Split
+# -------------------------
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42
+)
+
+# -------------------------
+# Scale for ElasticNet
+# -------------------------
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+
+# =============================================================
+# 1) Random Forest
+# =============================================================
+rf = RandomForestRegressor(n_estimators=300, random_state=42)
+rf.fit(X_train, y_train)
+
+rf_pred = rf.predict(X_test)
+
+rf_r2 = r2_score(y_test, rf_pred)
+rf_rmse = np.sqrt(mean_squared_error(y_test, rf_pred))
+rf_mae = mean_absolute_error(y_test, rf_pred)
+
+print("\n===== Random Forest =====")
+print(f"R²   : {rf_r2:.4f}")
+print(f"RMSE : {rf_rmse:.4f}")
+print(f"MAE  : {rf_mae:.4f}")
+
+# =============================================================
+# 2) ElasticNet
+# =============================================================
+elastic = ElasticNet(alpha=0.1, l1_ratio=0.5, random_state=42)
+elastic.fit(X_train_scaled, y_train)
+
+elastic_pred = elastic.predict(X_test_scaled)
+
+elastic_r2 = r2_score(y_test, elastic_pred)
+elastic_rmse = np.sqrt(mean_squared_error(y_test, elastic_pred))
+elastic_mae = mean_absolute_error(y_test, elastic_pred)
+
+print("\n===== ElasticNet =====")
+print(f"R²   : {elastic_r2:.4f}")
+print(f"RMSE : {elastic_rmse:.4f}")
+print(f"MAE  : {elastic_mae:.4f}")
+
+# =============================================================
+# 3) Random Forest Feature Importance
+# =============================================================
+importances = rf.feature_importances_
+sorted_idx = np.argsort(importances)
+
+plt.figure(figsize=(8, 6))
+plt.barh(np.array(feature_names)[sorted_idx], importances[sorted_idx])
+plt.title("Random Forest Feature Importances")
+plt.grid(True, alpha=0.3)
+plt.show()
+
+# =============================================================
+# 4) Cross Validation
+# =============================================================
+kfold = KFold(n_splits=5, shuffle=True, random_state=42)
+
+cv_r2 = cross_val_score(rf, X, y, cv=kfold, scoring="r2")
+cv_rmse = np.sqrt(-cross_val_score(rf, X, y, cv=kfold, scoring="neg_mean_squared_error"))
+cv_mae = -cross_val_score(rf, X, y, cv=kfold, scoring="neg_mean_absolute_error")
+
+print("\n===== Random Forest CV (5-fold) =====")
+print(f"R²   : {cv_r2.mean():.4f} ± {cv_r2.std():.4f}")
+print(f"RMSE : {cv_rmse.mean():.4f} ± {cv_rmse.std():.4f}")
+print(f"MAE  : {cv_mae.mean():.4f} ± {cv_mae.std():.4f}")
+
+# =============================================================
+# 5) Pearson + Spearman Correlation
+# =============================================================
+corr_pearson = df[feature_names + ["target_next_displacement"]].corr(method="pearson")
+corr_spearman = df[feature_names + ["target_next_displacement"]].corr(method="spearman")
+
+plt.figure(figsize=(12, 10))
+sns.heatmap(corr_pearson, cmap="coolwarm", annot=False)
+plt.title("Pearson Correlation Matrix")
+plt.show()
+
+plt.figure(figsize=(12, 10))
+sns.heatmap(corr_spearman, cmap="coolwarm", annot=False)
+plt.title("Spearman Correlation Matrix")
+plt.show()
+
+# =============================================================
+# 6) Mutual Information Feature Importance
+# =============================================================
+mi = mutual_info_regression(X, y, random_state=42)
+
+plt.figure(figsize=(8, 6))
+plt.barh(feature_names, mi)
+plt.title("Mutual Information Feature Importance")
+plt.grid(True, alpha=0.3)
+plt.show()
+
+# =============================================================
+# 7) SHAP Feature Importance
+# =============================================================
+import shap
+shap.initjs()
+
+explainer = shap.TreeExplainer(rf)
+shap_values = explainer.shap_values(X_train)
+
+# Summary plot
+shap.summary_plot(shap_values, X_train, feature_names=feature_names)
+
+# Bar plot
+shap.summary_plot(shap_values, X_train, feature_names=feature_names, plot_type="bar")
+
+# =============================================================
+# 8) Actual vs Predicted scatter
+# =============================================================
+def plot_actual_vs_pred(actual, predicted, title):
+    plt.figure(figsize=(6,6))
+    plt.scatter(actual, predicted, alpha=0.5)
+    plt.plot([actual.min(), actual.max()], [actual.min(), actual.max()], "r--")
+    plt.xlabel("Actual (t+1)")
+    plt.ylabel("Predicted (t+1)")
+    plt.title(title)
+    plt.grid(True)
+    plt.show()
+
+plot_actual_vs_pred(y_test, rf_pred, "Random Forest — Actual vs Predicted")
+plot_actual_vs_pred(y_test, elastic_pred, "ElasticNet — Actual vs Predicted")

@@ -1,0 +1,395 @@
+# pcmci_by_soc_groups_full_results.py
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import networkx as nx
+import matplotlib.lines as mlines
+import os
+import warnings
+
+from tigramite import data_processing as pp
+from tigramite.pcmci import PCMCI
+from tigramite.independence_tests.parcorr import ParCorr
+from matplotlib.patches import Ellipse
+
+warnings.filterwarnings("ignore")
+plt.rcParams['figure.dpi'] = 120
+plt.rcParams['font.size'] = 12
+
+# -------------------------
+# User settings
+# -------------------------
+DATA_PATH = npz_path = "/content/URM_TEH_NEY_MARV_LENJ.npz"
+TAU_MAX = 2           # PCMCI max lag
+PC_ALPHA = 0.05       # pc-alpha for PCMCI thresholding (if used)
+SOC_SPLIT_METHOD = "median"  # "median" or "quantile" or "custom"
+CUSTOM_SOC_THRESHOLD = None  # set number if SOC_SPLIT_METHOD == "custom"
+
+# -------------------------
+# Index mapping (0-based)
+# -------------------------
+idx = {
+    "RootMoist_inst": 0,
+    "SoilMoi0_10cm_inst": 1,
+    "SoilMoi10_40cm_inst": 2,
+    "SoilMoi40_100cm_inst": 3,
+    "SoilMoi100_200cm_inst": 4,
+    "SoilTMP0_10cm_inst": 5,
+    "SoilTMP10_40cm_inst": 6,
+    "SoilTMP40_100cm_inst": 7,
+    "SoilTMP100_200cm_inst": 8,
+    "Evap_tavg": 9,
+    "Rainf_tavg": 10,
+    "Qsb_acc": 11,
+    "Tair_f_inst": 12,
+    "Wind_f_inst": 13,
+    "avg_displacement_mm": 14,
+    "soc_mean_05": 22,
+    "soc_mean_1530": 30,
+    "soc_mean_60100": 38,
+    "soc_mean_100200": 46,
+}
+
+# -------------------------
+# Helper loader
+# -------------------------
+def load_dataset(path):
+    if os.path.exists(path):
+        try:
+            if path.lower().endswith(".npz") or path.lower().endswith(".npy"):
+                npz = np.load(path, allow_pickle=True)
+                if 'data' in npz and 'coords' in npz:
+                    return npz['data'], npz['coords']
+                arrays = [npz[k] for k in npz.files]
+                if len(arrays) >= 2:
+                    return arrays[0], arrays[1]
+                elif len(arrays) == 1:
+                    return arrays[0], None
+                else:
+                    raise ValueError("No arrays found in npz.")
+            else:
+                arr = np.loadtxt(path)
+                return arr, None
+        except Exception as e:
+            print(f"Failed to load {path} directly: {e}")
+    raise FileNotFoundError(f"Could not load dataset from '{path}'.")
+
+
+# -------------------------
+# SOC metric
+# -------------------------
+def compute_soc_metric(data, method="avg_depths"):
+    if data.ndim != 3:
+        raise ValueError("Expected data shape (time, n_pixels, n_features). Got " + str(data.shape))
+    _, n_pixels, n_features = data.shape
+    first_step = data[0, :, :]
+    try:
+        s05 = first_step[:, idx["soc_mean_05"]]
+    except Exception:
+        raise KeyError("soc_mean_05 index not found.")
+    socs = [s05]
+    for key in ["soc_mean_1530", "soc_mean_60100", "soc_mean_100200"]:
+        if idx[key] < n_features:
+            socs.append(first_step[:, idx[key]])
+    soc_stack = np.column_stack(socs)
+    soc_avg_depths = np.nanmean(soc_stack, axis=1)
+    soc_surface = s05
+    return {"avg_depths": soc_avg_depths, "surface": soc_surface, "depth_stack": soc_stack}
+
+
+# -------------------------
+# Split pixels
+# -------------------------
+def split_pixels_by_soc(soc_metric, method="median", custom_threshold=None):
+    if method == "median":
+        thr = np.nanmedian(soc_metric)
+    elif method == "quantile":
+        thr = np.nanquantile(soc_metric, 0.5)
+    elif method == "custom":
+        if custom_threshold is None:
+            raise ValueError("custom threshold required")
+        thr = custom_threshold
+    else:
+        raise ValueError("Unknown split method")
+    low_idx = np.where(np.isfinite(soc_metric) & (soc_metric <= thr))[0]
+    high_idx = np.where(np.isfinite(soc_metric) & (soc_metric > thr))[0]
+    return low_idx, high_idx, thr
+
+
+# -------------------------
+# Build time series for group
+# -------------------------
+def build_group_timeseries(data, pixel_indices, feature_indices, feature_names):
+    if pixel_indices.size == 0:
+        raise ValueError("Group has zero pixels.")
+    sel = data[:, pixel_indices[:, None], feature_indices]
+    group_ts = np.nanmean(sel, axis=1)
+    df = pd.DataFrame(group_ts, columns=feature_names)
+    df_interp = df.interpolate(method='linear', limit_direction='both', axis=0)
+    df_clean = df_interp.dropna()
+    return df_clean
+
+
+# -------------------------
+# Export and print full PCMCI table
+# -------------------------
+def export_and_print_pcmci_table(results, var_names, tau_max, out_prefix):
+    """
+    Exports CSV and prints terminal table of all detected links (and optionally all tested links).
+    We iterate over i (target), j (source), tau (lag) and collect link, val, p.
+    """
+    N = len(var_names)
+    link_graph = results.get('graph', None)
+    val_matrix = results.get('val_matrix', None)
+    p_matrix = results.get('p_matrix', None)  # may or may not exist
+
+    rows = []
+    for i in range(N):
+        for j in range(N):
+            for tau in range(tau_max + 1):
+                link = None
+                try:
+                    link = link_graph[i, j, tau] if link_graph is not None else ''
+                except Exception:
+                    link = ''
+                # Only record links that were flagged (non-empty) — but user asked full results; we record only discovered links.
+                if link != '':
+                    val = None
+                    p = None
+                    if val_matrix is not None:
+                        try:
+                            val = float(val_matrix[i, j, tau])
+                        except Exception:
+                            val = None
+                    if p_matrix is not None:
+                        try:
+                            p = float(p_matrix[i, j, tau])
+                        except Exception:
+                            p = None
+                    row = {
+                        "source": var_names[j],
+                        "target": var_names[i],
+                        "lag": tau,
+                        "link": link,
+                        "mci_value": val,
+                        "p_value": p
+                    }
+                    rows.append(row)
+
+    if len(rows) == 0:
+        print(f"No links found by PCMCI for group {out_prefix}.")
+    else:
+        df_links = pd.DataFrame(rows)
+        # Order columns nicely
+        df_links = df_links[["source", "target", "lag", "link", "mci_value", "p_value"]]
+
+        # Print to terminal (nicely)
+        print("\n" + "="*60)
+        print(f"PCMCI links for group: {out_prefix} (total links = {len(df_links)})")
+        print(df_links.to_string(index=False, float_format='{:0.6f}'.format))
+        print("="*60 + "\n")
+
+        # Save to CSV
+        out_csv = f"pcmci_full_results_{out_prefix}.csv"
+        df_links.to_csv(out_csv, index=False)
+        print(f"Saved full PCMCI results CSV: {out_csv}")
+
+        return df_links
+
+    # return empty DataFrame if no rows
+    return pd.DataFrame(columns=["source", "target", "lag", "link", "mci_value", "p_value"])
+
+
+# -------------------------
+# Run PCMCI + plot with edge labels
+# -------------------------
+def run_pcmci_and_plot(df_time, var_names, tau_max, out_prefix):
+    print(f"Running PCMCI for group '{out_prefix}' with {df_time.shape[0]} time steps and {len(var_names)} variables.")
+    data_array = df_time.values
+    dataframe = pp.DataFrame(data_array, var_names=var_names)
+    parcorr = ParCorr(significance='analytic')
+    pcmci = PCMCI(dataframe=dataframe, cond_ind_test=parcorr, verbosity=0)
+    results = pcmci.run_pcmci(tau_max=tau_max, pc_alpha=PC_ALPHA)
+    print("PCMCI run complete.")
+
+    # Export & print the full result table (links, lags, p-values)
+    df_links = export_and_print_pcmci_table(results, var_names, tau_max, out_prefix)
+
+    # Build NetworkX graph and annotate edges with lag and p
+    N = len(var_names)
+    G = nx.DiGraph()
+    for v in var_names:
+        G.add_node(v)
+
+    # Add edges (only edges present in graph)
+    link_graph = results.get('graph', None)
+    val_matrix = results.get('val_matrix', None)
+    p_matrix = results.get('p_matrix', None)
+
+    for i in range(N):
+        for j in range(N):
+            for tau in range(tau_max + 1):
+                link = ''
+                try:
+                    link = link_graph[i, j, tau] if link_graph is not None else ''
+                except Exception:
+                    link = ''
+                if tau == 1 and link != '':
+                    weight = None
+                    pval = None
+                    try:
+                        weight = float(val_matrix[i, j, tau]) if val_matrix is not None else None
+                    except Exception:
+                        weight = None
+                    try:
+                        pval = float(p_matrix[i, j, tau]) if p_matrix is not None else None
+                    except Exception:
+                        pval = None
+                    # Add an edge from source var j to target var i with attributes
+                    G.add_edge(var_names[j], var_names[i], lag=tau, weight=weight, pvalue=pval)
+
+    # Plot
+    plt.figure(figsize=(8, 6))
+    pos = nx.circular_layout(G)
+    node_colors = {n: 'gold' if n == "SS" else 'skyblue' for n in G.nodes()}
+    edge_widths = []
+    weights = [d.get('weight', 0.0) for u, v, d in G.edges(data=True)]
+    if weights:
+        abs_weights = [abs(w) for w in weights]
+        max_abs = max(abs_weights) if abs_weights else 1.0
+        norm = plt.Normalize(-max_abs, max_abs)
+        cmap = plt.cm.coolwarm
+        edge_colors = [cmap(norm(d.get('weight', 0.0))) for u, v, d in G.edges(data=True)]
+    else:
+        edge_colors = ['green'] * len(G.edges())
+    for u, v, d in G.edges(data=True):
+        w = d.get('weight', 0.0)
+        edge_widths.append(3.0 * abs(w) + 0.3)
+
+    # Draw edges
+    nx.draw_networkx_edges(G, pos, width=edge_widths, edge_color=edge_colors, arrowsize=25, connectionstyle='arc3, rad=0.2')
+
+    # Draw nodes as ovals (ellipses)
+    node_width = 0.15  # Adjust for desired oval width
+    node_height = 0.15  # Adjust for desired oval height (smaller than width for horizontal oval)
+    for node, (x, y) in pos.items():
+        ell = Ellipse((x, y), width=node_width, height=node_height, color=node_colors[node], ec='black', zorder=1)
+        plt.gca().add_patch(ell)
+
+    nx.draw_networkx_labels(G, pos, font_size=10)
+
+    legend_elements = [
+        mlines.Line2D([0], [0], marker='o', color='w', label='Target (Displacement)',
+                      markerfacecolor='gold', markeredgecolor='black', markersize=12),
+        mlines.Line2D([0], [0], marker='o', color='w', label='Predictor Variable',
+                      markerfacecolor='skyblue', markeredgecolor='black', markersize=12)
+    ]
+    plt.legend(handles=legend_elements, loc='upper right')
+    plt.title(f"PCMCI Graph — group: {out_prefix}")
+    plt.axis('off')
+
+    if weights:
+        sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])
+        cbar = plt.colorbar(sm, ax=plt.gca(), orientation='vertical', fraction=0.046, pad=0.04)
+        cbar.set_label('MCI Strength')
+
+    plt.tight_layout()
+    out_fn_pdf = f"pcmci_graph_{out_prefix}.pdf"
+    out_fn_png = f"pcmci_graph_{out_prefix}.png"
+    plt.savefig(out_fn_pdf, format='pdf', dpi=700)
+    plt.savefig(out_fn_png, dpi=700)
+    plt.show()
+    print(f"Saved PCMCI graph to {out_fn_pdf} and {out_fn_png}")
+
+    # Return results and table for downstream use
+    return results, df_links
+
+
+
+# -------------------------
+# Main pipeline
+# -------------------------
+def main():
+    # load
+    try:
+        data, coords = load_dataset(DATA_PATH)
+        print("Loaded dataset. Data shape:", data.shape)
+    except Exception as e:
+        print("Error loading dataset:", e)
+        print("Creating dummy random data (56,84,47) for demonstration.")
+        data = np.random.rand(56, 84, 47)
+        coords = None
+
+    # ensure time dimension first
+    if data.shape[0] != 56 and data.shape[2] == 56:
+        print("Transposing data because first dimension isn't time.")
+        data = np.transpose(data, (2, 1, 0))
+
+    time_steps, n_pixels, n_features = data.shape
+    print(f"Data shape verified: time={time_steps}, pixels={n_pixels}, features={n_features}")
+
+    # compute SOC metric and split
+    socs = compute_soc_metric(data, method="avg_depths")
+    soc_metric = socs["avg_depths"]
+    print(f"SOC metric example (first 8): {np.round(soc_metric[:8], 3)}")
+
+    low_idx, high_idx, thr = split_pixels_by_soc(soc_metric, method=SOC_SPLIT_METHOD, custom_threshold=CUSTOM_SOC_THRESHOLD)
+    print(f"SOC split method={SOC_SPLIT_METHOD}, threshold={thr:.4g}. Low group size={len(low_idx)}, High group size={len(high_idx)}")
+
+    # dynamic variables selection
+    selected_vars = [
+        ("R", idx["Rainf_tavg"]),
+        ("GW", idx["Qsb_acc"]),
+        ("RM", idx["RootMoist_inst"]),
+        ("SM", idx["SoilMoi0_10cm_inst"]),
+        ("Ev", idx["Evap_tavg"]),
+        ("ST", idx["SoilTMP0_10cm_inst"]),
+        ("W", idx["Wind_f_inst"]),
+        ("AT", idx["Tair_f_inst"]),
+        ("SS", idx["avg_displacement_mm"]),
+    ]
+    selected = [(name, i) for (name, i) in selected_vars if i < n_features]
+    feature_names = [s[0] for s in selected]
+    feature_indices = [s[1] for s in selected]
+    print("Selected dynamic variables for PCMCI:", feature_names)
+
+    group_defs = [("lowSOC", low_idx), ("highSOC", high_idx)]
+    results_by_group = {}
+
+    for group_name, pix_idx in group_defs:
+        if pix_idx.size == 0:
+            print(f"Skipping {group_name} (0 pixels).")
+            continue
+        try:
+            df_group = build_group_timeseries(data, pix_idx, feature_indices, feature_names)
+            if df_group.shape[0] < (TAU_MAX + 2):
+                print(f"Group {group_name} too few timesteps ({df_group.shape[0]}). Skipping.")
+                continue
+            results, df_links = run_pcmci_and_plot(df_group, feature_names, TAU_MAX, out_prefix=group_name)
+            results_by_group[group_name] = {"df": df_group, "results": results, "links": df_links}
+        except Exception as e:
+            print(f"Error processing group {group_name}: {e}")
+
+    print("Pipeline finished. Groups processed:", list(results_by_group.keys()))
+
+    # Save lightweight index CSV
+    df_groups = pd.DataFrame({"groups": list(results_by_group.keys())})
+    df_groups.to_csv("pcmci_results_by_group.csv", index=False)
+    print("Saved lightweight results index file: pcmci_results_by_group.csv")
+
+    # Optionally combine the per-group link CSVs into a single master CSV
+    all_links = []
+    for g, info in results_by_group.items():
+        df_links = info.get("links", pd.DataFrame())
+        if not df_links.empty:
+            df_links = df_links.copy()
+            df_links["group"] = g
+            all_links.append(df_links)
+    if all_links:
+        df_all = pd.concat(all_links, ignore_index=True)
+        df_all.to_csv("pcmci_full_results_all_groups.csv", index=False)
+        print("Saved combined PCMCI links for all groups to: pcmci_full_results_all_groups.csv")
+
+if __name__ == "__main__":
+    main()

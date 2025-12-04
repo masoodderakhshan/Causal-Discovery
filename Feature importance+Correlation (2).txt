@@ -1,0 +1,97 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.feature_selection import mutual_info_regression
+
+# -------------------------
+# Load data
+# -------------------------
+npz = np.load("/content/URM_TEH_NEY_MARV_LENJ.npz", allow_pickle=True)
+data = npz["data"]
+coords = npz["coords"]
+
+# -------------------------
+# Select features
+# -------------------------
+selected_indices = [
+    0, 1, 5, 9, 10, 11, 12, 13, 14, 22
+]
+
+feature_names = [
+    "RootMoist_inst",
+    "SoilMoi0_10cm_inst",
+    "SoilTMP0_10cm_inst",
+    "Evap_tavg",
+    "Rainf_tavg",
+    "Qsb_acc",
+    "Tair_f_inst",
+    "Wind_f_inst",
+    "avg_displacement_mm",
+    "soc_mean_05"
+]
+
+# -------------------------
+# Build dataset (X_t → y_{t+1})
+# -------------------------
+X_list = []
+y_list = []
+
+T, G, F = data.shape
+
+for t in range(T - 1):
+    X_t = data[t][:, selected_indices]
+    y_next = data[t + 1][:, 14]  # Next time-step displacement
+    X_list.append(X_t)
+    y_list.append(y_next)
+
+X_flat = np.vstack(X_list)
+y_flat = np.hstack(y_list)
+
+df = pd.DataFrame(X_flat, columns=feature_names)
+df["target_next_displacement"] = y_flat
+df = df.replace([np.inf, -np.inf], np.nan).dropna()
+
+# -------------------------
+# Correlation Matrices
+# -------------------------
+corr_pearson = df[feature_names + ["target_next_displacement"]].corr(method="pearson")
+corr_spearman = df[feature_names + ["target_next_displacement"]].corr(method="spearman")
+
+# -------------------------
+# Pearson Plot with Annotations
+# -------------------------
+plt.figure(figsize=(12, 10))
+sns.heatmap(corr_pearson, cmap="coolwarm", annot=True, fmt=".2f",
+            annot_kws={"size": 8}, square=True)
+plt.title("Pearson Correlation Matrix", fontsize=14)
+plt.tight_layout()
+plt.savefig("pearson_correlation_700dpi.png", dpi=700)
+plt.show()
+
+# -------------------------
+# Spearman Plot with Annotations
+# -------------------------
+plt.figure(figsize=(12, 10))
+sns.heatmap(corr_spearman, cmap="coolwarm", annot=True, fmt=".2f",
+            annot_kws={"size": 8}, square=True)
+plt.title("Spearman Correlation Matrix", fontsize=14)
+plt.tight_layout()
+plt.savefig("spearman_correlation_700dpi.png", dpi=700)
+plt.show()
+
+# -------------------------
+# Mutual Information Feature Importance
+# -------------------------
+X = df[feature_names].values
+y = df["target_next_displacement"].values
+
+mi = mutual_info_regression(X, y, random_state=42)
+
+plt.figure(figsize=(8, 6))
+plt.barh(feature_names, mi)
+plt.title("Mutual Information Feature Importance", fontsize=14)
+plt.grid(True, alpha=0.3)
+plt.tight_layout()
+plt.savefig("mutual_information_700dpi.png", dpi=700)
+plt.show()

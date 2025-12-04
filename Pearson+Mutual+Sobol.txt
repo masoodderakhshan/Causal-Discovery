@@ -1,0 +1,256 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.feature_selection import mutual_info_regression
+
+# Sobol sensitivity (SALib)
+from SALib.sample import saltelli
+from SALib.analyze import sobol
+
+# Set styles for article-friendly plots
+sns.set_style("white")
+sns.set_context("paper")
+plt.rcParams['font.family'] = 'serif'
+plt.rcParams['font.serif'] = ['DejaVu Serif']
+
+# -------------------------
+# Load data
+# -------------------------
+npz = np.load("/content/URM_TEH_NEY_MARV_LENJ.npz", allow_pickle=True)
+data = npz["data"]
+coords = npz["coords"]
+
+# -------------------------
+# Select features
+# -------------------------
+selected_indices = [
+    0, 1, 5, 9, 10, 11, 12, 13, 14, 22, 30, 38, 46
+]
+
+feature_names = [
+    "RootMoist_inst",
+    "SoilMoi0_10cm_inst",
+    "SoilTMP0_10cm_inst",
+    "Evap_tavg",
+    "Rainf_tavg",
+    "Qsb_acc",
+    "Tair_f_inst",
+    "Wind_f_inst",
+    "avg_displacement_mm",
+    "soc_mean_05",
+    "soc_mean_1530",
+    "soc_mean_60100",
+    "soc_mean_100200"
+]
+
+# -------------------------
+# FEATURE NAME SHORT LABELS
+# -------------------------
+short_names = {
+    "RootMoist_inst": "RM",
+    "SoilMoi0_10cm_inst": "SM",
+    "SoilTMP0_10cm_inst": "ST",
+    "Evap_tavg": "Ev",
+    "Rainf_tavg": "R",
+    "Qsb_acc": "GW",
+    "Tair_f_inst": "AT",
+    "Wind_f_inst": "W",
+    "avg_displacement_mm": "SS",
+    "soc_mean_05": "SOC (0-5)",
+    "soc_mean_1530": "SOC (15-30)",
+    "soc_mean_60100": "SOC (60-100)",
+    "soc_mean_100200": "SOC (100-200)"
+}
+
+short_feature_names = [short_names[f] for f in feature_names]
+
+# -------------------------
+# Build dataset (X_t → y_{t+1})
+# -------------------------
+X_list = []
+y_list = []
+
+T, G, F = data.shape
+
+for t in range(T - 1):
+    X_t = data[t][:, selected_indices]
+    y_next = data[t + 1][:, 14]  # Next time-step displacement
+    X_list.append(X_t)
+    y_list.append(y_next)
+
+X_flat = np.vstack(X_list)
+y_flat = np.hstack(y_list)
+
+df = pd.DataFrame(X_flat, columns=feature_names)
+df["target_next_displacement"] = y_flat
+df = df.replace([np.inf, -np.inf], np.nan).dropna()
+
+# -------------------------
+# Correlation Matrices
+# -------------------------
+corr_pearson = df[feature_names + ["target_next_displacement"]].corr(method="pearson")
+corr_spearman = df[feature_names + ["target_next_displacement"]].corr(method="spearman")
+
+# Rename columns for plotting using short names
+corr_pearson.columns = short_feature_names + ["Target"]
+corr_pearson.index = short_feature_names + ["Target"]
+
+corr_spearman.columns = short_feature_names + ["Target"]
+corr_spearman.index = short_feature_names + ["Target"]
+
+mask = np.triu(np.ones_like(corr_pearson, dtype=bool), k=1)
+
+# -------------------------
+# Pearson Correlation Plot
+# -------------------------
+fig1, ax1 = plt.subplots(figsize=(12, 10))
+sns.heatmap(corr_pearson, ax=ax1, mask=mask, cmap="YlGnBu", annot=True, fmt=".2f",
+            annot_kws={"size": 10}, square=True)
+ax1.set_title("Pearson Correlation Matrix (Lower Triangle)", fontsize=16)
+ax1.tick_params(axis='both', labelsize=13)
+plt.tight_layout()
+plt.savefig("pearson_correlation_700dpi.png", dpi=700)
+plt.show()
+
+# -------------------------
+# Spearman Correlation Plot
+# -------------------------
+fig2, ax2 = plt.subplots(figsize=(12, 10))
+sns.heatmap(corr_spearman, ax=ax2, mask=mask, cmap="YlGnBu", annot=True, fmt=".2f",
+            annot_kws={"size": 10}, square=True)
+ax2.set_title("Spearman Correlation Matrix (Lower Triangle)", fontsize=16)
+ax2.tick_params(axis='both', labelsize=13)
+plt.tight_layout()
+plt.savefig("spearman_correlation_700dpi.png", dpi=700)
+plt.show()
+
+
+# -------------------------
+# Mutual Information
+# -------------------------
+X = df[feature_names].values
+y = df["target_next_displacement"].values
+
+mi = mutual_info_regression(X, y, random_state=42)
+
+sorted_idx = np.argsort(mi)
+feature_names_sorted = [feature_names[i] for i in sorted_idx]
+mi_sorted = mi[sorted_idx]
+
+# -------------------------
+# SOBOL SENSITIVITY ANALYSIS
+# -------------------------
+
+# 1. Define SALib problem
+problem = {
+    "num_vars": len(feature_names),
+    "names": feature_names,
+    "bounds": np.column_stack((df[feature_names].min(), df[feature_names].max())).tolist()
+}
+
+# 2. Generate Saltelli samples
+N = 1024  # Increase if you want more accurate indices
+param_values = saltelli.sample(problem, N, calc_second_order=True)
+
+# 3. Build a simple regression model f(X) -> y
+# Using linear regression for deterministic Sobol evaluation
+from sklearn.linear_model import LinearRegression
+model = LinearRegression().fit(X, y)
+
+# 4. Model evaluation for Sobol
+Y_sobol = model.predict(param_values)
+
+# 5. Compute Sobol indices
+sobol_results = sobol.analyze(problem, Y_sobol, print_to_console=False)
+
+# Create Sobol DataFrame
+sobol_df = pd.DataFrame({
+    "Feature": feature_names,
+    "S1": sobol_results["S1"],
+    "S1_conf": sobol_results["S1_conf"],
+    "ST": sobol_results["ST"],
+    "ST_conf": sobol_results["ST_conf"]
+})
+
+# save CSV
+sobol_df.to_csv("sobol_results.csv", index=False)
+print("\n===== SOBOL RESULTS =====")
+print(sobol_df)
+
+# -------------------------
+# Pearson Correlation Plot
+# -------------------------
+fig1, ax1 = plt.subplots(figsize=(12, 10))
+mask = np.triu(np.ones_like(corr_pearson, dtype=bool), k=1)
+sns.heatmap(corr_pearson, ax=ax1, mask=mask, cmap="YlGnBu", annot=True, fmt=".2f",
+            annot_kws={"size": 10}, square=True)
+ax1.set_title("Pearson Correlation Matrix (Lower Triangle)", fontsize=16)
+ax1.tick_params(axis='both', labelsize=13)
+plt.tight_layout()
+plt.savefig("pearson_correlation_700dpi.png", dpi=700)
+plt.show()
+
+# -------------------------
+# Mutual Information Plot
+# -------------------------
+# sorting
+sorted_idx = np.argsort(mi)
+feature_names_sorted = [short_feature_names[i] for i in sorted_idx]
+mi_sorted = mi[sorted_idx]
+
+fig3, ax3 = plt.subplots(figsize=(10, 8))
+bars = ax3.barh(feature_names_sorted, mi_sorted, color=plt.cm.YlGnBu(np.linspace(0, 1, len(mi_sorted))))
+ax3.set_xlabel("Mutual Information", fontsize=12)
+ax3.set_ylabel("Features", fontsize=12)
+ax3.set_title("Mutual Information Feature Importance", fontsize=16)
+ax3.grid(True, alpha=0.3)
+ax3.tick_params(axis='both', labelsize=12)
+
+for i, v in enumerate(mi_sorted):
+    ax3.text(v, i, f" {v:.2f}", va='center', ha='left')
+
+plt.tight_layout()
+plt.savefig("mutual_info_700dpi.png", dpi=700)
+plt.show()
+
+
+# -------------------------
+# SOBOL PLOT (S1 & ST)
+# -------------------------
+# -------------------------
+# SORT SOBOL RESULTS (by ST descending)
+# -------------------------
+sobol_df_sorted = sobol_df.sort_values(by="ST", ascending=False).reset_index(drop=True)
+
+# -------------------------
+# SOBOL PLOT (Sorted | Horizontal | Annotated)
+# -------------------------
+sobol_df["Feature_short"] = short_feature_names
+sobol_df_sorted = sobol_df.sort_values(by="ST", ascending=False)
+
+fig4, ax4 = plt.subplots(figsize=(10, 8))
+y_pos = np.arange(len(sobol_df_sorted))
+
+ax4.barh(y_pos, sobol_df_sorted["S1"], height=0.35, label="S1")
+ax4.barh(y_pos + 0.35, sobol_df_sorted["ST"], height=0.35, label="ST")
+
+ax4.set_yticks(y_pos + 0.175)
+ax4.set_yticklabels(sobol_df_sorted["Feature_short"], fontsize=12)
+
+ax4.set_xlabel("Sobol Sensitivity Index", fontsize=14)
+ax4.set_title("Sobol Sensitivity Analysis (Sorted High → Low)", fontsize=16)
+ax4.invert_yaxis()
+ax4.legend(fontsize=12)
+ax4.grid(alpha=0.3)
+
+for i, v in enumerate(sobol_df_sorted["S1"]):
+    ax4.text(v + 0.01, i - 0.15, f"{v:.3f}", fontsize=10)
+
+for i, v in enumerate(sobol_df_sorted["ST"]):
+    ax4.text(v + 0.01, i + 0.2, f"{v:.3f}", fontsize=10)
+
+plt.tight_layout()
+plt.savefig("sobol_sensitivity_sorted_700dpi.png", dpi=700)
+plt.show()
+
