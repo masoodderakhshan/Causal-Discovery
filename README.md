@@ -21,13 +21,13 @@ submitted to *ISPRSJournalofPhotogrammetryandRemoteSensing*.
 
 
 ## 👥 Authors
+* **Masoud Ebrahimi Derakhshan**
+    * *School of Civil Engineering, Iran University of Science and Technology (IUST), Tehran, Iran*
+    * [![ORCID](https://img.shields.io/badge/ORCID-0009--0009--3453--8304-green)](https://orcid.org/0009-0009-3453-8304)
+* **Amirreza Shahmiri**
+    * *Department of Civil and Architectural Engineering, Sultan Qaboos University, Muscat, Oman*
+    * [![ORCID](https://img.shields.io/badge/ORCID-0009--0002--0746--3887-green)](https://orcid.org/0009-0002-0746-3887)
 
-**Masoud Ebrahimi Derakhshan(Corresponding Author)**
-School of Civil Engineering, Iran University of Science and Technology (IUST), Tehran, Iran
-* [![ORCID](https://img.shields.io/badge/ORCID-0009--0009--3453--8304-green)](https://orcid.org/0009-0009-3453-8304)
-
-**Amirreza Shahmiri**
-School of Civil Engineering, Iran University of Science and Technology (IUST), Tehran, Iran
 
 ---
 
@@ -37,9 +37,9 @@ If you use this repository, please cite the following manuscript:
 
 ```
 @article{Ebrahimi Derakhshan 2025 Subsidence,
-  title={Dynamic and Interpretable Modelling of Root-Soil Shear Behavior using Polynomial Regression and Physics-Informed Neural Networks},
-  author={Ebrahimi Derakhshan, Masoud and Ramzani, Mehrab},
-  journal={Engineering Research Express},
+  title={Uncovering Physical Mechanisms in Land Subsidence: A Causal Discovery Approach to Interpretable GeoAI},
+  author={Ebrahimi Derakhshan, Masoud and Shahmiri, Amirreza},
+  journal={ISPRSJournalofPhotogrammetryandRemoteSensing},
   year={2025},
   note={Submitted}
 }
