@@ -41,7 +41,7 @@ If you use this repository, please cite the following manuscript:
 ```
 @article{Ebrahimi Derakhshan 2025 Subsidence,
   title={The Role of Soil Organic Carbon in Modulating Land Subsidence Dynamics: A Causal Discovery Analysis},
-  author={Ebrahimi Derakhshan, Masoud and Shahmiri, Amirreza},
+  author={Ebrahimi Derakhshan, Masoud and Shahmiri, Amirreza and Karimpour-Fard Mehran },
   journal={Journal},
   year={2025},
   note={Submitted}
