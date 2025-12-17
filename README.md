@@ -1,9 +1,9 @@
 # The Role of Soil Organic Carbon in Modulating Land Subsidence Dynamics: A Causal Discovery Analysis
 ### 📝 Status
 
-**Journal:** Journal of Soil Science and Plant Nutrition (Submitted)
+**Journal:** Journal (Submitted)
 **License:** [![Status](https://img.shields.io/badge/Status-Submitted-blue)](https://www.Elsevier.com/journal/11069)
-[![Journal](https://img.shields.io/badge/Journal-JournalofSoilScienceandPlantNutrition-orange)](https://www.Elsevier.com/journal/11069)
+[![Journal](https://img.shields.io/badge/Journal-Journal-orange)](https://www.Elsevier.com/journal/11069)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
 ---
@@ -19,7 +19,7 @@ Keywords: Soil Subsidence; Causal Inference; PCMCI; Soil Organic Carbon (SOC); H
 This repository includes the source codes and methodology for the article:
 
 **"The Role of Soil Organic Carbon in Modulating Land Subsidence Dynamics: A Causal Discovery Analysis"**,
-submitted to *Journal of Soil Science and Plant Nutrition*.
+submitted to *Journal*.
 
 
 ## 👥 Authors
@@ -42,7 +42,7 @@ If you use this repository, please cite the following manuscript:
 @article{Ebrahimi Derakhshan 2025 Subsidence,
   title={The Role of Soil Organic Carbon in Modulating Land Subsidence Dynamics: A Causal Discovery Analysis},
   author={Ebrahimi Derakhshan, Masoud and Shahmiri, Amirreza},
-  journal={Journal of Soil Science and Plant Nutrition},
+  journal={Journal},
   year={2025},
   note={Submitted}
 }
