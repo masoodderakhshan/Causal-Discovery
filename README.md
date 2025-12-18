@@ -19,7 +19,7 @@ Keywords: Soil Subsidence; Causal Inference; PCMCI; Soil Organic Carbon (SOC); H
 This repository includes the source codes and methodology for the article:
 
 **"The Role of Soil Organic Carbon in Modulating Land Subsidence Dynamics: A Causal Discovery Analysis"**,
-submitted to *Journal*.
+submitted to *Agriculture, Ecosystems & Environment Journal*.
 
 
 ## 👥 Authors
@@ -29,9 +29,6 @@ submitted to *Journal*.
 * **Amirreza Shahmiri**
     * *Department of Civil and Architectural Engineering, Sultan Qaboos University, Muscat, Oman*
     * [![ORCID](https://img.shields.io/badge/ORCID-0009--0002--0746--3887-green)](https://orcid.org/0009-0002-0746-3887)
-* **Mehran Karimpour-Fard**
-    * *Assistant Professor, School of Civil Engineering, Iran University of Science and Technology, Tehran, Iran*
-    * [![ORCID](https://img.shields.io/badge/ORCID-0000--0001--5313--6444-green)](https://orcid.org/0000-0001-5313-6444)
 ---
 
 ## 📜 Citation
@@ -41,8 +38,8 @@ If you use this repository, please cite the following manuscript:
 ```
 @article{Ebrahimi Derakhshan 2025 Subsidence,
   title={The Role of Soil Organic Carbon in Modulating Land Subsidence Dynamics: A Causal Discovery Analysis},
-  author={Ebrahimi Derakhshan, Masoud and Shahmiri, Amirreza and Karimpour-Fard, Mehran},
-  journal={Journal},
+  author={Ebrahimi Derakhshan, Masoud and Shahmiri, Amirreza},
+  journal={Agriculture, Ecosystems & Environment Journal},
   year={2025},
   note={Submitted}
 }
